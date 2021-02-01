@@ -182,7 +182,7 @@ public:
     void ForEachAnchorAuthByHeight(std::function<bool(const CAnchorAuthIndex::Auth &)> callback) const;
     void PruneOlderThan(THeight height);
 
-protected:
+private:
     Auths auths;
 };
 
@@ -443,7 +443,7 @@ class CAnchorAwaitingConfirms
     using ConfirmMessageHash = uint256;
     using AnchorTxHash = uint256;
 
-protected:
+private:
     using Confirm = CAnchorConfirmMessage;
 
     typedef boost::multi_index_container<Confirm,

@@ -299,6 +299,24 @@ boost::optional<std::pair<CKeyID, uint256> > CMasternodesView::AmIOperator() con
     return {};
 }
 
+std::set<std::pair<CKeyID, uint256>> CMasternodesView::GetOperatorsMulti() const
+{
+    auto const operators = gArgs.GetArgs("-masternode_operator");
+    std::set<std::pair<CKeyID, uint256>> operatorPairs;
+    for(auto const & key : operators) {
+        CTxDestination const dest = DecodeDestination(key);
+        CKeyID const authAddress = dest.which() == 1 ? CKeyID(*boost::get<PKHash>(&dest)) :
+                                   dest.which() == 4 ? CKeyID(*boost::get<WitnessV0KeyHash>(&dest)) : CKeyID();
+        if (!authAddress.IsNull()) {
+            if (auto nodeId = GetMasternodeIdByOperator(authAddress)) {
+                operatorPairs.insert(std::make_pair(authAddress, *nodeId));
+            }
+        }
+    }
+
+    return operatorPairs;
+}
+
 boost::optional<std::pair<CKeyID, uint256> > CMasternodesView::AmIOwner() const
 {
     CTxDestination dest = DecodeDestination(gArgs.GetArg("-masternode_owner", ""));
@@ -639,8 +657,6 @@ void CCustomCSView::CreateAndRelayConfirmMessageIfNeed(const CAnchorIndex::Ancho
     if (panchorAwaitingConfirms->Add(*confirmMessage)) {
         LogPrint(BCLog::ANCHORING, "%s: Create message %s\n", __func__, confirmMessage->GetHash().GetHex());
         RelayAnchorConfirm(confirmMessage->GetHash(), *g_connman);
-    }    else {
-        LogPrint(BCLog::ANCHORING, "%s: Not relaying %s because message (or vote!) already exist\n", __func__, confirmMessage->GetHash().GetHex());
     }
 }
 

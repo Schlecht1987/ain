@@ -129,6 +129,9 @@ public:
     boost::optional<std::pair<CKeyID, uint256>> AmIOperator() const;
     boost::optional<std::pair<CKeyID, uint256>> AmIOwner() const;
 
+    // Multiple operator support
+    std::set<std::pair<CKeyID, uint256>> GetOperatorsMulti() const;
+
     Res CreateMasternode(uint256 const & nodeId, CMasternode const & node);
     Res ResignMasternode(uint256 const & nodeId, uint256 const & txid, int height);
 //    void UnCreateMasternode(uint256 const & nodeId);

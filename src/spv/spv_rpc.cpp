@@ -560,7 +560,11 @@ UniValue spv_listanchorauths(const JSONRPCRequest& request)
     UniValue result(UniValue::VARR);
     CAnchorAuthIndex::Auth const * prev = nullptr;
     std::vector<CKeyID> signers;
-    panchorauths->ForEachAnchorAuthByHeight([&result, &prev, &signers](const CAnchorAuthIndex::Auth & auth) {
+    std::vector<std::string> signatories;
+    const CKeyID* teamData{nullptr};
+    uint64_t anchorCreationHeight{0};
+
+    panchorauths->ForEachAnchorAuthByHeight([&](const CAnchorAuthIndex::Auth & auth) {
         if (!prev)
             prev = &auth;
 
@@ -569,14 +573,56 @@ UniValue spv_listanchorauths(const JSONRPCRequest& request)
             UniValue item(UniValue::VOBJ);
             item.pushKV("blockHeight", static_cast<int>(prev->height));
             item.pushKV("blockHash", prev->blockHash.ToString());
+            if (anchorCreationHeight != 0) {
+                item.pushKV("creationHeight", static_cast<int>(anchorCreationHeight));
+            }
             item.pushKV("signers", (uint64_t)signers.size());
+
+            UniValue signees(UniValue::VARR);
+            for (const auto& sigs : signatories) {
+                signees.push_back(sigs);
+            }
+
+            if (!signees.empty()) {
+                item.pushKV("signees", signees);
+            }
+
             result.push_back(item);
 
             // clear
             signers.clear();
+            signatories.clear();
+            teamData = nullptr;
+            anchorCreationHeight = 0;
             prev = &auth;
         }
-        signers.push_back(auth.GetSigner());
+
+        auto hash160 = auth.GetSigner();
+        signers.push_back(hash160);
+
+        const auto id = pcustomcsview->GetMasternodeIdByOperator(auth.GetSigner());
+        if (id) {
+            const auto mn = pcustomcsview->GetMasternode(*id);
+            if (mn) {
+                auto dest = mn->operatorType == 1 ? CTxDestination(PKHash(hash160)) : CTxDestination(WitnessV0KeyHash(hash160));
+                signatories.push_back(EncodeDestination(dest));
+            }
+        }
+
+        if (!teamData && prev->nextTeam.size() == 1) {
+            std::vector<uint8_t> marker(3, '0');
+
+            // Team entry
+            teamData = &(*prev->nextTeam.begin());
+
+            // Get marker
+            memcpy(marker.data(), &teamData, spv::BtcAnchorMarker.size());
+
+            if (marker == spv::BtcAnchorMarker) {
+                memcpy(&anchorCreationHeight, &teamData + spv::BtcAnchorMarker.size(), sizeof(uint64_t));
+            }
+        }
+
         return true;
     });
 
@@ -585,7 +631,20 @@ UniValue spv_listanchorauths(const JSONRPCRequest& request)
         UniValue item(UniValue::VOBJ);
         item.pushKV("blockHeight", static_cast<int>(prev->height));
         item.pushKV("blockHash", prev->blockHash.ToString());
+        if (anchorCreationHeight != 0) {
+            item.pushKV("creationHeight", static_cast<int>(anchorCreationHeight));
+        }
         item.pushKV("signers", (uint64_t)signers.size());
+
+        UniValue signees(UniValue::VARR);
+        for (const auto& sigs : signatories) {
+            signees.push_back(sigs);
+        }
+
+        if (!signees.empty()) {
+            item.pushKV("signees", signees);
+        }
+
         result.push_back(item);
     }
     return result;

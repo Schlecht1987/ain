@@ -4011,24 +4011,38 @@ bool CChainState::AcceptBlock(const std::shared_ptr<const CBlock>& pblock, CVali
     return true;
 }
 
-bool AmISignerNow(CAnchorData::CTeam const & team, CKeyID & operatorAuthAddress, CKey & masternodeKey)
+// Organise set by CKeyID, no comparator results in compiler error.
+auto comp = [](const std::pair<CKeyID, CKey>& lhs, const std::pair<CKeyID, CKey>& rhs) {
+    return lhs.first < rhs.first;
+};
+
+bool AmISignerNow(CAnchorData::CTeam const & team, std::set<std::pair<const CKeyID, const CKey>, decltype(comp)>& operatorDetails)
 {
     AssertLockHeld(cs_main);
 
-    auto const mnId = pcustomcsview->AmIOperator();
-    if (mnId && pcustomcsview->GetMasternode(mnId->second)->IsActive() && team.find(mnId->first) != team.end()) { // this is safe due to prev call `AmIOperator`
-        std::vector<std::shared_ptr<CWallet>> wallets = GetWallets();
-        for (auto const & wallet : wallets) {
-            if (wallet->GetKey(mnId->first, masternodeKey)) {
-                break;
+    auto const mnIds = pcustomcsview->GetOperatorsMulti();
+    for (const auto& mnId : mnIds)
+    {
+        if (pcustomcsview->GetMasternode(mnId.second)->IsActive() && team.find(mnId.first) != team.end())
+        {
+            CKey masternodeKey;
+            std::vector<std::shared_ptr<CWallet>> wallets = GetWallets();
+            for (auto const & wallet : wallets) {
+                if (wallet->GetKey(mnId.first, masternodeKey)) {
+                    break;
+                }
+                masternodeKey = CKey{};
             }
-            masternodeKey = CKey{};
-        }
-        if (masternodeKey.IsValid()) {
-            operatorAuthAddress = mnId->first;
-            return true;
+            if (masternodeKey.IsValid()) {
+                operatorDetails.emplace(mnId.first, masternodeKey);
+            }
         }
     }
+
+    if (!operatorDetails.empty()) {
+        return true;
+    }
+
     return false;
 }
 
@@ -4071,15 +4085,15 @@ void ProcessAuthsIfTipChanged(CBlockIndex const * oldTip, CBlockIndex const * ti
         RelayGetAnchorAuths(pindexFork->GetBlockHash(), tip->GetBlockHash(), *g_connman);
     }
 
-    CKey masternodekey;
-    CKeyID operatorAuthAddress;
+    // masternode key and operator auth address
+    std::set<std::pair<const CKeyID, const CKey>, decltype(comp)> operatorDetails(comp);
 
     if (newAnchorLogic) {
-        if (!AmISignerNow(*teamDakota, operatorAuthAddress, masternodekey)) {
+        if (!AmISignerNow(*teamDakota, operatorDetails)) {
             return;
         }
     } else {
-        if (!AmISignerNow(team, operatorAuthAddress, masternodekey)) {
+        if (!AmISignerNow(team, operatorDetails)) {
             return;
         }
     }
@@ -4133,19 +4147,22 @@ void ProcessAuthsIfTipChanged(CBlockIndex const * oldTip, CBlockIndex const * ti
 
         // trying to create and sign new auth
         CAnchorAuthMessage auth({topAnchor ? topAnchor->txHash : uint256(), static_cast<THeight>(anchorHeight), anchorBlock->GetBlockHash(), team});
-        if (!panchorauths->GetVote(auth.GetSignHash(), operatorAuthAddress))
-        {
-            auth.SignWithKey(masternodekey);
-            LogPrintf("Anchor auth message signed, hash: %s, height: %d, prev: %s, teamSize: %ld, signHash: %s\n",
-                      auth.GetHash().ToString(),
-                      auth.height,
-                      auth.previousAnchor.ToString(),
-                      auth.nextTeam.size(),
-                      auth.GetSignHash().ToString()
-                      );
 
-            panchorauths->AddAuth(auth);
-            vInv.push_back(CInv(MSG_ANCHOR_AUTH, auth.GetHash()));
+        for (const auto& keys : operatorDetails) {
+            if (!panchorauths->GetVote(auth.GetSignHash(), keys.first))
+            {
+                auth.SignWithKey(keys.second);
+                LogPrintf("Anchor auth message signed, hash: %s, height: %d, prev: %s, teamSize: %ld, signHash: %s\n",
+                          auth.GetHash().ToString(),
+                          auth.height,
+                          auth.previousAnchor.ToString(),
+                          auth.nextTeam.size(),
+                          auth.GetSignHash().ToString()
+                          );
+
+                panchorauths->AddAuth(auth);
+                vInv.push_back(CInv(MSG_ANCHOR_AUTH, auth.GetHash()));
+            }
         }
     }
     if (vInv.size() > 0) {
