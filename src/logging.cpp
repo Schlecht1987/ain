@@ -152,6 +152,7 @@ const CLogCategoryDesc LogCategories[] =
     {BCLog::LEVELDB, "leveldb"},
     {BCLog::STAKING, "staking"},
     {BCLog::ANCHORING, "anchoring"},
+    {BCLog::SPV, "spv"},
     {BCLog::ALL, "1"},
     {BCLog::ALL, "all"},
 };
